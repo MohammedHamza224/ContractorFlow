@@ -9,12 +9,59 @@ import {
   X,
   Package,
   Layers,
+  Hammer,
+  Paintbrush,
+  Zap,
+  Wrench,
+  ShieldCheck,
+  Tag,
 } from 'lucide-react'
 import { api } from '../../lib/api'
 import { useAuth } from '../../store/authStore'
 import { formatCurrency } from '../../lib/utils'
 import { ActionMenu } from '../../components/ui/ActionMenu'
 import { RecordActionModal, RecordActionType } from '../../components/ui/RecordActionModal'
+
+export const WORK_ITEM_CATEGORIES = [
+  { id: 'ALL', nameAr: 'جميع التصنيفات', nameEn: 'All Categories', icon: Layers },
+  { id: 'CONSTRUCTION', nameAr: 'الأعمال الإنشائية', nameEn: 'Structural Works', icon: Hammer },
+  { id: 'FINISHING', nameAr: 'أعمال التشطيبات', nameEn: 'Finishing Works', icon: Paintbrush },
+  { id: 'ELECTRICAL', nameAr: 'الأعمال الكهربائية', nameEn: 'Electrical Works', icon: Zap },
+  { id: 'PLUMBING_HVAC', nameAr: 'الميكانيكا والسباكة', nameEn: 'Plumbing & HVAC', icon: Wrench },
+  { id: 'MAINTENANCE', nameAr: 'أعمال الصيانة', nameEn: 'Maintenance', icon: ShieldCheck },
+] as const
+
+function getCategoryBadge(category?: string | null, isAr = true) {
+  switch (category) {
+    case 'CONSTRUCTION':
+      return {
+        label: isAr ? 'أعمال إنشائية' : 'Structural',
+        className: 'bg-blue-50 text-blue-700 border-blue-200',
+      }
+    case 'FINISHING':
+      return {
+        label: isAr ? 'أعمال تشطيبات' : 'Finishing',
+        className: 'bg-amber-50 text-amber-700 border-amber-200',
+      }
+    case 'ELECTRICAL':
+      return {
+        label: isAr ? 'أعمال كهربائية' : 'Electrical',
+        className: 'bg-purple-50 text-purple-700 border-purple-200',
+      }
+    case 'PLUMBING_HVAC':
+      return {
+        label: isAr ? 'ميكانيكا وسباكة' : 'Plumbing & HVAC',
+        className: 'bg-cyan-50 text-cyan-700 border-cyan-200',
+      }
+    case 'MAINTENANCE':
+      return {
+        label: isAr ? 'أعمال صيانة' : 'Maintenance',
+        className: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+      }
+    default:
+      return null
+  }
+}
 
 const COMMON_UNITS = [
   { ar: 'م²', en: 'SQM' },
@@ -39,6 +86,7 @@ export function WorkItemsPage() {
 
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState('ACTIVE')
+  const [selectedCategory, setSelectedCategory] = useState<string>('ALL')
   const [page, setPage] = useState(1)
 
   // Form Modal state
@@ -48,6 +96,8 @@ export function WorkItemsPage() {
     code: '',
     nameAr: '',
     nameEn: '',
+    category: 'CONSTRUCTION',
+    subCategory: '',
     descriptionAr: '',
     unitOfMeasureId: '',
     unit: 'م²',
@@ -79,14 +129,15 @@ export function WorkItemsPage() {
   const units: any[] = Array.isArray(unitsData) ? unitsData : []
 
   const { data, isLoading, isError } = useQuery({
-    queryKey: ['workItems', { search, statusFilter, page }],
+    queryKey: ['workItems', { search, statusFilter, selectedCategory, page }],
     queryFn: async () => {
       const res = await api.get('/work-items', {
         params: {
           search: search || undefined,
           status: statusFilter,
+          category: selectedCategory === 'ALL' ? undefined : selectedCategory,
           page,
-          limit: 25,
+          limit: 50,
         },
       })
       return res.data?.data
@@ -101,6 +152,8 @@ export function WorkItemsPage() {
       code: '',
       nameAr: '',
       nameEn: '',
+      category: selectedCategory !== 'ALL' ? selectedCategory : 'CONSTRUCTION',
+      subCategory: '',
       descriptionAr: '',
       unitOfMeasureId: defaultUnit?.id || '',
       unit: defaultUnit?.symbolAr || 'م²',
@@ -120,6 +173,8 @@ export function WorkItemsPage() {
       code: item.code || '',
       nameAr: item.nameAr || '',
       nameEn: item.nameEn || '',
+      category: item.category || 'CONSTRUCTION',
+      subCategory: item.subCategory || '',
       descriptionAr: item.descriptionAr || '',
       unitOfMeasureId: item.unitOfMeasureId || item.unitOfMeasure?.id || '',
       unit: item.unit || 'م²',
@@ -264,6 +319,7 @@ export function WorkItemsPage() {
 
   const items = data?.items || []
   const totalPages = data?.totalPages || 1
+  const categoryCounts = data?.categoryCounts || {}
 
   return (
     <div className="space-y-6">
@@ -288,6 +344,43 @@ export function WorkItemsPage() {
             <span>{t('workItems.addItem')}</span>
           </button>
         )}
+      </div>
+
+      {/* Category Filter Tabs */}
+      <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-none">
+        {WORK_ITEM_CATEGORIES.map((cat) => {
+          const isSelected = selectedCategory === cat.id
+          const count = cat.id === 'ALL' ? (data?.total ?? items.length) : (categoryCounts[cat.id] ?? 0)
+          const Icon = cat.icon
+
+          return (
+            <button
+              key={cat.id}
+              type="button"
+              onClick={() => {
+                setSelectedCategory(cat.id)
+                setPage(1)
+              }}
+              className={`inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-semibold whitespace-nowrap transition-all border ${
+                isSelected
+                  ? 'bg-[#0F172A] text-white border-[#0F172A] shadow-sm'
+                  : 'bg-white text-gray-600 border-gray-200 hover:bg-gray-50 hover:text-gray-900'
+              }`}
+            >
+              <Icon className={`w-3.5 h-3.5 ${isSelected ? 'text-[#E29A26]' : 'text-gray-400'}`} />
+              <span>{isAr ? cat.nameAr : cat.nameEn}</span>
+              <span
+                className={`px-1.5 py-0.5 rounded-full text-[10px] font-bold ${
+                  isSelected
+                    ? 'bg-white/20 text-white'
+                    : 'bg-gray-100 text-gray-600'
+                }`}
+              >
+                {count}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
       {/* Feedback Banner */}
@@ -328,7 +421,7 @@ export function WorkItemsPage() {
               setSearch(e.target.value)
               setPage(1)
             }}
-            placeholder={t('common.search')}
+            placeholder={isAr ? 'البحث بالاسم، الكود، التصنيف أو الوصف...' : 'Search by name, code, category or description...'}
             className="w-full ps-9 pe-3.5 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
           />
         </div>
@@ -357,11 +450,12 @@ export function WorkItemsPage() {
           <div className="p-12 text-center text-sm text-gray-500">{t('workItems.noItems')}</div>
         ) : (
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[640px] print:min-w-0 text-sm text-start">
+            <table className="w-full min-w-[720px] print:min-w-0 text-sm text-start">
               <thead className="bg-[#F8FAFC] border-b border-gray-200 text-xs text-gray-600 font-semibold uppercase">
                 <tr>
                   <th className="px-6 py-3.5 text-start">{t('workItems.code')}</th>
                   <th className="px-6 py-3.5 text-start">{t('common.name')}</th>
+                  <th className="px-6 py-3.5 text-start">{isAr ? 'التصنيف' : 'Category'}</th>
                   <th className="px-6 py-3.5 text-start">{t('workItems.unit')}</th>
                   <th className="px-6 py-3.5 text-start">{t('workItems.defaultPrice')}</th>
                   <th className="px-6 py-3.5 text-start">{t('nav.workEntries')}</th>
@@ -373,6 +467,7 @@ export function WorkItemsPage() {
                 {items.map((item: any) => {
                   const isArchived = !item.isActive
                   const blockedReason = computeBlockedReason(item)
+                  const categoryBadge = getCategoryBadge(item.category, isAr)
 
                   return (
                     <tr
@@ -382,7 +477,7 @@ export function WorkItemsPage() {
                       }`}
                     >
                       {/* Code */}
-                      <td className="px-6 py-4 font-mono text-xs text-gray-600" dir="ltr">
+                      <td className="px-6 py-4 font-mono text-xs text-gray-600 font-semibold" dir="ltr">
                         {item.code || '—'}
                       </td>
 
@@ -392,9 +487,32 @@ export function WorkItemsPage() {
                           {isAr ? item.nameAr : item.nameEn || item.nameAr}
                         </span>
                         {item.descriptionAr && (
-                          <span className="text-xs text-gray-500 block mt-0.5 line-clamp-1">
+                          <span className="text-xs text-gray-500 block mt-0.5 line-clamp-1 max-w-xs">
                             {item.descriptionAr}
                           </span>
+                        )}
+                      </td>
+
+                      {/* Category */}
+                      <td className="px-6 py-4">
+                        {item.category ? (
+                          <div className="flex flex-col gap-0.5 items-start">
+                            <span
+                              className={`inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium border ${
+                                categoryBadge?.className || 'bg-gray-100 text-gray-700 border-gray-200'
+                              }`}
+                            >
+                              <Tag className="w-3 h-3 opacity-60" />
+                              <span>{categoryBadge?.label || item.category}</span>
+                            </span>
+                            {item.subCategory && (
+                              <span className="text-[11px] text-gray-500 ps-1 font-normal">
+                                {item.subCategory}
+                              </span>
+                            )}
+                          </div>
+                        ) : (
+                          <span className="text-gray-400 text-xs">—</span>
                         )}
                       </td>
 
@@ -637,6 +755,43 @@ export function WorkItemsPage() {
                     onChange={(e) => setFormData({ ...formData, defaultPrice: e.target.value })}
                     className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
                     placeholder="0.00"
+                  />
+                </div>
+
+                {/* Category Selection */}
+                <div>
+                  <label className="block text-xs font-semibold text-gray-800 mb-1">
+                    {isAr ? 'التصنيف الرئيسي' : 'Primary Category'}{' '}
+                    <span className="text-red-500 font-bold">*</span>
+                  </label>
+                  <select
+                    required
+                    value={formData.category}
+                    onChange={(e) => setFormData({ ...formData, category: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm bg-white outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="CONSTRUCTION">{isAr ? 'الأعمال الإنشائية (CONSTRUCTION)' : 'Structural Works'}</option>
+                    <option value="FINISHING">{isAr ? 'أعمال التشطيبات (FINISHING)' : 'Finishing Works'}</option>
+                    <option value="ELECTRICAL">{isAr ? 'الأعمال الكهربائية (ELECTRICAL)' : 'Electrical Works'}</option>
+                    <option value="PLUMBING_HVAC">{isAr ? 'الميكانيكا والسباكة (PLUMBING_HVAC)' : 'Plumbing & HVAC'}</option>
+                    <option value="MAINTENANCE">{isAr ? 'أعمال الصيانة (MAINTENANCE)' : 'Maintenance Works'}</option>
+                  </select>
+                </div>
+
+                {/* Subcategory (Optional) */}
+                <div>
+                  <label className="block text-xs font-medium text-gray-700 mb-1">
+                    {isAr ? 'التصنيف الفرعي' : 'Subcategory'}{' '}
+                    <span className="text-xs text-gray-400 font-normal">
+                      ({t('common.optional')})
+                    </span>
+                  </label>
+                  <input
+                    type="text"
+                    value={formData.subCategory}
+                    onChange={(e) => setFormData({ ...formData, subCategory: e.target.value })}
+                    className="w-full px-3 py-2 border border-gray-300 rounded-lg text-sm outline-none focus:ring-2 focus:ring-blue-500"
+                    placeholder={isAr ? 'مثال: خرسانات، لياسة، إنارة...' : 'e.g. Concrete, Plastering, Lighting...'}
                   />
                 </div>
 

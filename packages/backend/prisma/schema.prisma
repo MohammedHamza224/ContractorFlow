@@ -485,6 +485,8 @@ model WorkItemTemplate {
   code           String?  // optional short code
   nameAr         String
   nameEn         String?
+  category       String?  // 'CONSTRUCTION' | 'FINISHING' | 'ELECTRICAL' | 'PLUMBING_HVAC' | 'MAINTENANCE'
+  subCategory    String?  // Detailed subcategory
   descriptionAr  String?
   descriptionEn  String?
   unit           String   // e.g., م², م, قطعة, ساعة ...
@@ -504,6 +506,7 @@ model WorkItemTemplate {
 
   @@unique([organizationId, code], name: "unique_org_code")
   @@index([organizationId])
+  @@index([organizationId, category])
   @@map("work_item_templates")
 }
 

@@ -40,6 +40,8 @@ router.get('/', requirePermission(PERMISSIONS.VIEW_DATA), async (req, res: Respo
   const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string) || 50));
   const skip = (page - 1) * limit;
   const search = (req.query.search as string)?.trim();
+  const category = (req.query.category as string)?.trim();
+  const subCategory = (req.query.subCategory as string)?.trim();
   const includeInactive = req.query.includeInactive === 'true';
   const statusFilter = (req.query.status as string)?.trim(); // 'ACTIVE' | 'ARCHIVED' | 'ALL'
   const excludeArchived = req.query.excludeArchived === 'true';
@@ -47,6 +49,14 @@ router.get('/', requirePermission(PERMISSIONS.VIEW_DATA), async (req, res: Respo
   const where: Prisma.WorkItemTemplateWhereInput = {
     organizationId,
   };
+
+  if (category && category !== 'ALL') {
+    where.category = category;
+  }
+
+  if (subCategory && subCategory !== 'ALL') {
+    where.subCategory = subCategory;
+  }
 
   if (statusFilter === 'ARCHIVED' || statusFilter === 'INACTIVE') {
     where.isActive = false;
@@ -65,10 +75,12 @@ router.get('/', requirePermission(PERMISSIONS.VIEW_DATA), async (req, res: Respo
       { nameEn: { contains: search, mode: 'insensitive' } },
       { code: { contains: search, mode: 'insensitive' } },
       { descriptionAr: { contains: search, mode: 'insensitive' } },
+      { category: { contains: search, mode: 'insensitive' } },
+      { subCategory: { contains: search, mode: 'insensitive' } },
     ];
   }
 
-  const [total, rawItems] = await Promise.all([
+  const [total, rawItems, categoryGroupCounts] = await Promise.all([
     prisma.workItemTemplate.count({ where }),
     prisma.workItemTemplate.findMany({
       where,
@@ -80,7 +92,18 @@ router.get('/', requirePermission(PERMISSIONS.VIEW_DATA), async (req, res: Respo
       },
       orderBy: [{ sortOrder: 'asc' }, { createdAt: 'desc' }],
     }),
+    prisma.workItemTemplate.groupBy({
+      by: ['category'],
+      where: { organizationId, isActive: true },
+      _count: { _all: true },
+    }),
   ]);
+
+  const categoryCounts: Record<string, number> = {};
+  for (const group of categoryGroupCounts) {
+    const key = group.category || 'UNCATEGORIZED';
+    categoryCounts[key] = group._count._all;
+  }
 
   const items = rawItems.map((item) => ({
     ...item,
@@ -95,6 +118,7 @@ router.get('/', requirePermission(PERMISSIONS.VIEW_DATA), async (req, res: Respo
       page,
       limit,
       totalPages: Math.ceil(total / limit),
+      categoryCounts,
     },
   });
 });
@@ -158,6 +182,8 @@ router.post(
       code,
       nameAr,
       nameEn,
+      category,
+      subCategory,
       descriptionAr,
       descriptionEn,
       unit,
@@ -203,6 +229,18 @@ router.post(
     if (!nameAr || !String(nameAr).trim()) throw new ValidationError('nameAr is required');
     if (!resolvedUnit) throw new ValidationError('unit is required');
 
+    // Duplicate name prevention within organization
+    const existingName = await prisma.workItemTemplate.findFirst({
+      where: {
+        organizationId,
+        nameAr: String(nameAr).trim(),
+        isActive: true,
+      },
+    });
+    if (existingName) {
+      throw new ValidationError(`يوجد بند عمل بنفس الاسم "${nameAr}" بالفعل في مؤسستك`);
+    }
+
     let parsedPrice: Decimal | null = null;
     if (defaultPrice !== undefined && defaultPrice !== null && defaultPrice !== '') {
       const num = Number(defaultPrice);
@@ -229,6 +267,8 @@ router.post(
           code: code ? String(code).trim() : null,
           nameAr: String(nameAr).trim(),
           nameEn: nameEn ? String(nameEn).trim() : null,
+          category: category ? String(category).trim() : null,
+          subCategory: subCategory ? String(subCategory).trim() : null,
           descriptionAr: descriptionAr ? String(descriptionAr).trim() : null,
           descriptionEn: descriptionEn ? String(descriptionEn).trim() : null,
           unit: resolvedUnit,
@@ -296,6 +336,25 @@ router.put(
       throw new ValidationError('unit cannot be empty');
     }
 
+    // Duplicate name prevention within organization
+    if (
+      rawUpdateData.nameAr !== undefined &&
+      String(rawUpdateData.nameAr).trim() &&
+      String(rawUpdateData.nameAr).trim() !== existing.nameAr
+    ) {
+      const existingName = await prisma.workItemTemplate.findFirst({
+        where: {
+          organizationId,
+          nameAr: String(rawUpdateData.nameAr).trim(),
+          isActive: true,
+          id: { not: existing.id },
+        },
+      });
+      if (existingName) {
+        throw new ValidationError(`يوجد بند عمل بنفس الاسم "${rawUpdateData.nameAr}" بالفعل في مؤسستك`);
+      }
+    }
+
     // Code uniqueness check if changed
     if (
       rawUpdateData.code !== undefined &&
@@ -324,6 +383,12 @@ router.put(
     if (rawUpdateData.nameAr !== undefined) updateData.nameAr = String(rawUpdateData.nameAr).trim();
     if (rawUpdateData.nameEn !== undefined) {
       updateData.nameEn = rawUpdateData.nameEn ? String(rawUpdateData.nameEn).trim() : null;
+    }
+    if (rawUpdateData.category !== undefined) {
+      updateData.category = rawUpdateData.category ? String(rawUpdateData.category).trim() : null;
+    }
+    if (rawUpdateData.subCategory !== undefined) {
+      updateData.subCategory = rawUpdateData.subCategory ? String(rawUpdateData.subCategory).trim() : null;
     }
     if (rawUpdateData.descriptionAr !== undefined) {
       updateData.descriptionAr = rawUpdateData.descriptionAr ? String(rawUpdateData.descriptionAr).trim() : null;
