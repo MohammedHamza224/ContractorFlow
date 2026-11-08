@@ -638,11 +638,15 @@ router.put(
   }
 );
 
-// ─── Delete Payment ─────────────────────────────────────────────
+// ─── Delete / Reverse Payment ────────────────────────────────────
 
 /**
  * DELETE /api/payments/:id
- * Within 24 hours of creation. Reverses the payment amounts on the invoice.
+ * Reverses an authorized payment and recalculates invoice balances atomically.
+ * Preserves historical transaction record with status REVERSED.
+ * Policy:
+ * - Within 24 hours of recording: direct reversal by authorized recording users.
+ * - After 24 hours or if already approved: requires ORG_ADMIN, SUPER_ADMIN, or ORG_MANAGER role.
  */
 router.delete(
   '/:id',
@@ -651,74 +655,135 @@ router.delete(
     const authReq = req as AuthenticatedRequest;
     const { organizationId, id: userId, role } = authReq.user;
 
-    await prisma.$transaction(async (tx) => {
+    const result = await prisma.$transaction(async (tx) => {
       const payment = await tx.payment.findFirst({
         where: { id: req.params.id, organizationId },
+        include: {
+          invoice: true,
+        },
       });
 
       if (!payment) throw new NotFoundError('Payment');
 
-      // Financial safeguard: if payment is approved, require manager/admin privileges
-      if (
-        payment.status === 'APPROVED' &&
-        role !== UserRole.ORG_ADMIN &&
-        role !== UserRole.SUPER_ADMIN &&
-        role !== UserRole.ORG_MANAGER
-      ) {
-        throw new BusinessRuleError('Deleting an approved payment requires manager or administrator privileges');
+      // Prevent duplicate reversal (idempotency guard)
+      if (payment.status === 'REVERSED') {
+        throw new BusinessRuleError(
+          'الدفعة المالية معكوسة بالفعل ولا يمكن تكرار عكسها / Payment is already reversed'
+        );
       }
+
+      // Authorization & policy checks
+      const isManager =
+        role === UserRole.ORG_ADMIN ||
+        role === UserRole.SUPER_ADMIN ||
+        role === UserRole.ORG_MANAGER;
 
       const ageMs = Date.now() - payment.createdAt.getTime();
       const twentyFourHours = 24 * 60 * 60 * 1000;
-      if (ageMs > twentyFourHours) {
-        throw new BusinessRuleError('Payments can only be deleted within 24 hours of recording');
+
+      // Policy: Payments older than 24 hours require manager or admin authorization
+      if (ageMs > twentyFourHours && !isManager) {
+        throw new BusinessRuleError(
+          'عكس الدفعات التي مضى عليها أكثر من 24 ساعة يتطلب صلاحية المدير المالي أو مدير النظام / Payments older than 24 hours require manager or administrator authorization for reversal'
+        );
       }
 
+      // Financial safeguard: Approved payments require manager or admin privileges
+      if (payment.status === 'APPROVED' && !isManager) {
+        throw new BusinessRuleError(
+          'عكس الدفعات المعتمدة يتطلب صلاحية المدير المالي أو مدير النظام / Reversing an approved payment requires manager or administrator privileges'
+        );
+      }
+
+      if (!payment.invoiceId) {
+        throw new BusinessRuleError(
+          'الدفعة غير مرتبطة بفاتورة صالحة / Payment is not linked to a valid invoice'
+        );
+      }
+
+      // Row-level lock on invoice to prevent concurrent race conditions
       await tx.$queryRaw`SELECT id FROM invoices WHERE id = ${payment.invoiceId} AND "organizationId" = ${organizationId} FOR UPDATE`;
 
-      await tx.payment.delete({ where: { id: req.params.id } });
-
       const invoice = await tx.invoice.findUnique({ where: { id: payment.invoiceId } });
-      if (invoice) {
-        const newPaidAmount = Decimal.max(
-          new Decimal(0),
-          roundDecimal(invoice.paidAmount.sub(payment.amount), 4)
-        );
-        const newRemainingAmount = roundDecimal(invoice.remainingAmount.add(payment.amount), 4);
+      if (!invoice) throw new NotFoundError('Invoice');
 
-        let paymentStatus: PaymentStatus;
-        if (newPaidAmount.lte(0)) {
-          paymentStatus = PaymentStatus.UNPAID;
-        } else if (newRemainingAmount.lte(0)) {
-          paymentStatus = PaymentStatus.PAID;
-        } else {
-          paymentStatus = PaymentStatus.PARTIALLY_PAID;
-        }
+      // Preserve historical record by transitioning lifecycle status to REVERSED
+      const updatedPayment = await tx.payment.update({
+        where: { id: payment.id },
+        data: {
+          status: 'REVERSED',
+          notes: payment.notes
+            ? `${payment.notes}\n[تم العكس بتاريخ ${new Date().toISOString()}]`
+            : `[تم العكس بتاريخ ${new Date().toISOString()}]`,
+        },
+      });
 
-        await tx.invoice.update({
-          where: { id: payment.invoiceId },
-          data: {
-            paidAmount: newPaidAmount,
-            remainingAmount: newRemainingAmount,
-            paymentStatus,
-          },
-        });
+      // Recalculate invoice balances with bounds protection
+      const newPaidAmount = Decimal.max(
+        new Decimal(0),
+        roundDecimal(invoice.paidAmount.sub(payment.amount), 4)
+      );
+      const newRemainingAmount = Decimal.min(
+        invoice.totalAmount,
+        roundDecimal(invoice.remainingAmount.add(payment.amount), 4)
+      );
+
+      let paymentStatus: PaymentStatus;
+      if (newPaidAmount.lte(0)) {
+        paymentStatus = PaymentStatus.UNPAID;
+      } else if (newRemainingAmount.lte(0)) {
+        paymentStatus = PaymentStatus.PAID;
+      } else {
+        paymentStatus = PaymentStatus.PARTIALLY_PAID;
       }
 
+      const updatedInvoice = await tx.invoice.update({
+        where: { id: payment.invoiceId },
+        data: {
+          paidAmount: newPaidAmount,
+          remainingAmount: newRemainingAmount,
+          paymentStatus,
+        },
+      });
+
+      // Audit trail record
       await tx.auditLog.create({
         data: {
           organizationId,
           userId,
-          action: 'DELETE',
+          action: 'CANCEL',
           entityType: 'Payment',
           entityId: payment.id,
-          description: `Reversed payment of ${payment.amount} on invoice ${payment.invoiceId}`,
+          description: `عكس الدفعة المالية ${payment.referenceNo || payment.id} بقيمة ${payment.amount} SAR على الفاتورة ${invoice.referenceNo}`,
+          metadata: {
+            paymentId: payment.id,
+            paymentReferenceNo: payment.referenceNo,
+            invoiceId: invoice.id,
+            invoiceReferenceNo: invoice.referenceNo,
+            reversedAmount: payment.amount.toString(),
+            previousPaidAmount: invoice.paidAmount.toString(),
+            newPaidAmount: newPaidAmount.toString(),
+            previousRemainingAmount: invoice.remainingAmount.toString(),
+            newRemainingAmount: newRemainingAmount.toString(),
+            previousInvoiceStatus: invoice.paymentStatus,
+            newInvoiceStatus: paymentStatus,
+            reversedByRole: role,
+          },
           ipAddress: req.ip || req.socket.remoteAddress,
         },
       });
+
+      return {
+        payment: updatedPayment,
+        invoice: updatedInvoice,
+      };
     }, TX_DEFAULT_OPTIONS);
 
-    res.json({ success: true, message: 'Payment deleted and invoice updated' });
+    res.json({
+      success: true,
+      message: 'تم عكس الدفعة وتحديث رصيد الفاتورة بنجاح / Payment reversed and invoice updated successfully',
+      data: result,
+    });
   }
 );
 

@@ -268,6 +268,7 @@ describe('Payments', () => {
         .set(authHeader(lifecycleOrg.accessToken));
 
       expect(delRes.status).toBe(200);
+      expect(delRes.body.success).toBe(true);
 
       // Verify invoice balances are restored
       const inv = await request
@@ -277,6 +278,33 @@ describe('Payments', () => {
       expect(parseFloat(inv.body.data.paidAmount)).toBe(0);
       expect(parseFloat(inv.body.data.remainingAmount)).toBe(parseFloat(inv.body.data.totalAmount));
       expect(inv.body.data.paymentStatus).toBe('UNPAID');
+    });
+
+    it('marks payment status as REVERSED and preserves historical record', async () => {
+      const getRes = await request
+        .get(`/api/payments/${paymentId}`)
+        .set(authHeader(lifecycleOrg.accessToken));
+
+      expect(getRes.status).toBe(200);
+      expect(getRes.body.data.status).toBe('REVERSED');
+      expect(getRes.body.data.notes).toContain('تم العكس');
+    });
+
+    it('prevents duplicate reversal of an already reversed payment', async () => {
+      const dupDel = await request
+        .delete(`/api/payments/${paymentId}`)
+        .set(authHeader(lifecycleOrg.accessToken));
+
+      expect(dupDel.status).toBe(422);
+      expect(dupDel.body.error.message).toContain('معكوسة بالفعل');
+    });
+
+    it('returns 404 when attempting to reverse a non-existent payment', async () => {
+      const notFoundRes = await request
+        .delete('/api/payments/non-existent-payment-id')
+        .set(authHeader(lifecycleOrg.accessToken));
+
+      expect(notFoundRes.status).toBe(404);
     });
   });
 });

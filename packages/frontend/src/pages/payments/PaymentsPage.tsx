@@ -14,6 +14,7 @@ import {
   ShieldCheck,
   Clock,
   AlertTriangle,
+  Loader2,
 } from 'lucide-react'
 import { api } from '../../lib/api'
 import { formatCurrency } from '../../lib/utils'
@@ -110,18 +111,22 @@ export function PaymentsPage() {
       queryClient.invalidateQueries({ queryKey: ['dashboard'] })
       setDeletingPayment(null)
       if (viewingPayment) setViewingPayment(null)
+      deleteMutation.reset()
       setFeedback({
         type: 'success',
-        message: isAr ? 'تم عكس الدفعة وتحديث رصيد الفاتورة' : 'Payment reversed successfully',
+        message: isAr
+          ? 'تم عكس الدفعة المالية وتحديث رصيد الفاتورة بنجاح'
+          : 'Payment reversed and invoice balance updated successfully',
       })
     },
     onError: (err: any) => {
+      const errMsg =
+        err?.response?.data?.error?.message ||
+        err?.response?.data?.message ||
+        (isAr ? 'فشل عكس / حذف الدفعة المالية' : 'Failed to reverse payment')
       setFeedback({
         type: 'error',
-        message:
-          err?.response?.data?.error?.message ||
-          err?.response?.data?.message ||
-          (isAr ? 'فشل عكس / حذف الدفعة' : 'Failed to delete payment'),
+        message: errMsg,
       })
     },
   })
@@ -741,12 +746,35 @@ export function PaymentsPage() {
               </p>
             </div>
 
+            {/* Error Display inside modal if reversal fails */}
+            {deleteMutation.isError && (
+              <div className="p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs flex items-start gap-2">
+                <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+                <div className="flex-1">
+                  <span className="font-bold block mb-0.5">
+                    {isAr ? 'تعذر تنفيذ عملية العكس' : 'Reversal Failed'}
+                  </span>
+                  <span className="text-[11px] text-red-600 block leading-relaxed">
+                    {(deleteMutation.error as any)?.response?.data?.error?.message ||
+                      (deleteMutation.error as any)?.response?.data?.message ||
+                      (deleteMutation.error as any)?.message ||
+                      (isAr
+                        ? 'حدث خطأ أثناء عكس الدفعة. يرجى مراجعة الصلاحيات والمحاولة لاحقاً.'
+                        : 'An error occurred while reversing the payment.')}
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="flex items-center justify-end gap-2.5 pt-2">
               <button
                 type="button"
-                onClick={() => setDeletingPayment(null)}
+                onClick={() => {
+                  deleteMutation.reset()
+                  setDeletingPayment(null)
+                }}
                 disabled={deleteMutation.isPending}
-                className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-100 transition-colors"
+                className="px-4 py-2 rounded-xl border border-gray-300 text-xs font-semibold text-gray-700 hover:bg-gray-100 transition-colors disabled:opacity-50"
               >
                 {isAr ? 'تراجع' : 'Cancel'}
               </button>
@@ -755,9 +783,13 @@ export function PaymentsPage() {
                 onClick={() => deleteMutation.mutate(deletingPayment.id)}
                 disabled={deleteMutation.isPending}
                 data-testid="confirm-delete-payment-btn"
-                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-sm disabled:opacity-50"
+                className="inline-flex items-center gap-1.5 px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs font-bold transition-all shadow-sm disabled:opacity-50 cursor-pointer disabled:cursor-not-allowed"
               >
-                <Trash2 className="w-4 h-4" />
+                {deleteMutation.isPending ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Trash2 className="w-4 h-4" />
+                )}
                 <span>
                   {deleteMutation.isPending
                     ? isAr

@@ -230,16 +230,42 @@ export function PaymentDetailModal({
                     <span className="text-gray-500 block">
                       {isAr ? 'الحساب المستلم (الشركة)' : 'Receiving Account'}
                     </span>
-                    <span className="font-semibold text-gray-900">
-                      {payment.bankAccount
-                        ? `${isAr ? payment.bankAccount.bankNameAr : payment.bankAccount.bankNameEn} — ${payment.bankAccount.accountName}`
-                        : isAr
-                        ? 'الحساب الافتراضي'
-                        : 'Default Account'}
-                    </span>
-                    {payment.bankAccount?.iban && (
-                      <span className="text-[11px] font-mono text-gray-500 block mt-0.5">
-                        {payment.bankAccount.iban}
+                    {payment.bankAccount ? (
+                      <div>
+                        <span className="font-semibold text-gray-900 block">
+                          {isAr
+                            ? (payment.bankAccount.bankNameAr || payment.bankAccount.bankNameEn || 'البنك المسجل')
+                            : (payment.bankAccount.bankNameEn || payment.bankAccount.bankNameAr || 'Registered Bank')}
+                          {(payment.bankAccount.beneficiaryNameAr ||
+                            payment.bankAccount.accountName ||
+                            payment.bankAccount.beneficiaryNameEn) && (
+                            <span className="text-gray-600 font-normal ms-1">
+                              —{' '}
+                              {isAr
+                                ? (payment.bankAccount.beneficiaryNameAr ||
+                                   payment.bankAccount.accountName ||
+                                   payment.bankAccount.beneficiaryNameEn)
+                                : (payment.bankAccount.beneficiaryNameEn ||
+                                   payment.bankAccount.accountName ||
+                                   payment.bankAccount.beneficiaryNameAr)}
+                            </span>
+                          )}
+                        </span>
+                        {payment.bankAccount.accountNumber && (
+                          <span className="text-[11px] font-mono text-gray-500 block mt-0.5">
+                            {isAr ? 'رقم الحساب: ' : 'Acc: '}
+                            {payment.bankAccount.accountNumber}
+                          </span>
+                        )}
+                        {payment.bankAccount.iban && (
+                          <span className="text-[11px] font-mono text-gray-500 block mt-0.5">
+                            {payment.bankAccount.iban}
+                          </span>
+                        )}
+                      </div>
+                    ) : (
+                      <span className="font-semibold text-gray-600">
+                        {isAr ? 'الحساب البنكي الافتراضي للشركة' : 'Company Default Bank Account'}
                       </span>
                     )}
                   </div>
