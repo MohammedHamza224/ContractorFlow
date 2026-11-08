@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { Decimal } from '@prisma/client/runtime/library';
-import { prisma } from '../lib/prisma';
+import { prisma, TX_DEFAULT_OPTIONS } from '../lib/prisma';
 import {
   authenticate,
   requirePermission,
@@ -325,7 +325,7 @@ router.post('/', requirePermission(PERMISSIONS.RECORD_PAYMENTS), async (req, res
     });
 
     return payment;
-  });
+  }, TX_DEFAULT_OPTIONS);
 
   res.status(201).json({ success: true, data: result });
 });
@@ -399,7 +399,7 @@ router.post(
       });
 
       return updated;
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.json({
       success: true,
@@ -628,7 +628,7 @@ router.put(
       });
 
       return payment;
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.json({
       success: true,
@@ -716,7 +716,7 @@ router.delete(
           ipAddress: req.ip || req.socket.remoteAddress,
         },
       });
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.json({ success: true, message: 'Payment deleted and invoice updated' });
   }

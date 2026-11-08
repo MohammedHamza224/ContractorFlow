@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { Decimal } from '@prisma/client/runtime/library';
-import { prisma } from '../lib/prisma';
+import { prisma, TX_DEFAULT_OPTIONS } from '../lib/prisma';
 import {
   authenticate,
   requirePermission,
@@ -332,7 +332,7 @@ router.post('/', requirePermission(PERMISSIONS.CREATE_STATEMENTS), async (req, r
     });
 
     return statement;
-  });
+  }, TX_DEFAULT_OPTIONS);
 
   res.status(201).json({ success: true, data: result });
 });
@@ -450,7 +450,7 @@ router.post(
       });
 
       return stmt;
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.json({ success: true, data: updated });
   }
@@ -500,7 +500,7 @@ router.post(
       });
 
       return stmt;
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.json({ success: true, data: updated });
   }
@@ -715,7 +715,7 @@ router.delete(
           ipAddress: req.ip || req.socket.remoteAddress,
         },
       });
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.json({
       success: true,

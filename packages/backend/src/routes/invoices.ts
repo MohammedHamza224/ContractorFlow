@@ -1,6 +1,6 @@
 import { Router, Response } from 'express';
 import { Decimal } from '@prisma/client/runtime/library';
-import { prisma } from '../lib/prisma';
+import { prisma, TX_DEFAULT_OPTIONS } from '../lib/prisma';
 import {
   authenticate,
   requirePermission,
@@ -50,9 +50,10 @@ router.use(authenticate);
  */
 async function syncWorkEntryBillingStatus(
   tx: Prisma.TransactionClient,
-  workEntryId: string
+  workEntryId: string,
+  currentWe?: { status: WorkEntryStatus; quantity: Decimal; billedQuantity: Decimal }
 ): Promise<void> {
-  const we = await tx.workEntry.findUnique({ where: { id: workEntryId } });
+  const we = currentWe || (await tx.workEntry.findUnique({ where: { id: workEntryId } }));
   if (!we) return;
 
   let newStatus: WorkEntryStatus = we.status;
@@ -337,8 +338,8 @@ router.post(
 
     const invoice = await prisma.$transaction(async (tx) => {
       const sortedStmtIds = [...new Set(targetStatementIds)].sort();
-      for (const sId of sortedStmtIds) {
-        await tx.$queryRaw`SELECT id FROM statements WHERE id = ${sId} AND "organizationId" = ${organizationId} FOR UPDATE`;
+      if (sortedStmtIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM statements WHERE id IN (${Prisma.join(sortedStmtIds)}) AND "organizationId" = ${organizationId} FOR UPDATE`;
       }
 
       const statements = await tx.statement.findMany({
@@ -531,7 +532,7 @@ router.post(
       });
 
       return inv;
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.status(201).json({ success: true, data: invoice });
   }
@@ -605,8 +606,8 @@ router.post(
       const uniqueWorkEntryIds = [
         ...new Set(inputLines.map((l: any) => l.workEntryId).filter(Boolean)),
       ].sort();
-      for (const weId of uniqueWorkEntryIds) {
-        await tx.$queryRaw`SELECT id FROM work_entries WHERE id = ${weId} AND "organizationId" = ${organizationId} FOR UPDATE`;
+      if (uniqueWorkEntryIds.length > 0) {
+        await tx.$queryRaw`SELECT id FROM work_entries WHERE id IN (${Prisma.join(uniqueWorkEntryIds)}) AND "organizationId" = ${organizationId} FOR UPDATE`;
       }
 
       const processedLines: {
@@ -665,11 +666,11 @@ router.post(
           );
         }
 
-        await tx.workEntry.update({
+        const updatedWe = await tx.workEntry.update({
           where: { id: workEntryId },
           data: { billedQuantity: { increment: bq } },
         });
-        await syncWorkEntryBillingStatus(tx, workEntryId);
+        await syncWorkEntryBillingStatus(tx, workEntryId, updatedWe);
 
         const grossLine = roundDecimal(bq.mul(we.unitPrice), 4);
         const discountPct = new Decimal(lineDiscountPctInput?.toString() ?? '0');
@@ -802,7 +803,7 @@ router.post(
       });
 
       return inv;
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.status(201).json({ success: true, data: invoice });
   }
@@ -1020,7 +1021,7 @@ router.post(
       });
 
       return inv;
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.json({ success: true, data: updated });
   }
@@ -1336,7 +1337,7 @@ router.post(
       });
 
       return createdNote;
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.status(201).json({ success: true, data: noteInvoice });
   }
@@ -1434,7 +1435,7 @@ router.post(
       });
 
       return updated;
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.json({ success: true, data: result });
   }
@@ -1863,7 +1864,7 @@ router.delete(
           ipAddress: req.ip || req.socket.remoteAddress,
         },
       });
-    });
+    }, TX_DEFAULT_OPTIONS);
 
     res.json({
       success: true,

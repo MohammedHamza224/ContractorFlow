@@ -17,6 +17,15 @@ export const prisma: PrismaClient =
         : ['warn', 'error'],
   });
 
+/**
+ * Standard configuration for interactive transactions across the application.
+ * Prevents P2028 / timeout failures over network latency to cloud databases (Supabase Tokyo pooler).
+ */
+export const TX_DEFAULT_OPTIONS = {
+  maxWait: 20000, // 20s waiting to acquire a connection
+  timeout: 60000, // 60s interactive transaction timeout
+};
+
 if (config.nodeEnv !== 'production' || process.env.VERCEL) {
   global.__prisma = prisma;
 }
